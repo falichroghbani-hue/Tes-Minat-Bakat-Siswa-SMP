@@ -1,0 +1,1456 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tes Minat Bakat & Penjurusan Siswa SMP (SMA vs SMK)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-bg {
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #1e3a8a 100%);
+        }
+        @media print {
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background: white !important; color: black !important; }
+            .shadow-card { box-shadow: none !important; border: 1px solid #e2e8f0; }
+        }
+    </style>
+
+    <!-- Firebase Imports (v11.6.1) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global environment setup
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'edupath-smp-v1';
+        const defaultConfig = {
+            apiKey: "demo-api-key",
+            authDomain: "edupath-smp.firebaseapp.com",
+            projectId: "edupath-smp",
+            storageBucket: "edupath-smp.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef"
+        };
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultConfig;
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Expose Firebase tools to global scope safely
+        window.db = db;
+        window.appId = appId;
+        window.auth = auth;
+        window.firestoreMethods = { collection, doc, setDoc, deleteDoc, onSnapshot };
+
+        // Handle Authentication
+        async function authenticateUser() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.warn("Auth warning, fallback to anonymous auth:", err);
+                try { await signInAnonymously(auth); } catch(e) { console.error(e); }
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                window.currentUser = user;
+                console.log("Firebase Auth Ready. User ID:", user.uid);
+                // Trigger real-time listener for Teacher Panel once authenticated
+                if (window.initTeacherListener) {
+                    window.initTeacherListener();
+                }
+            }
+        });
+
+        authenticateUser();
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col justify-between">
+
+    <!-- Header Navigation -->
+    <header class="bg-white/90 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 no-print">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3 cursor-pointer" onclick="switchTab('student')">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold text-xl shadow-md">
+                    🎓
+                </div>
+                <div>
+                    <h1 class="font-bold text-slate-800 text-base sm:text-lg leading-tight">EduPath SMP</h1>
+                    <p class="text-xs text-slate-500">Tes Minat Bakat & Penjurusan Real-time</p>
+                </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <div class="flex items-center gap-2">
+                <button id="nav-btn-student" onclick="switchTab('student')" 
+                    class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 transition">
+                    📝 Tes Siswa
+                </button>
+                <button id="nav-btn-teacher" onclick="openTeacherLoginModal()" 
+                    class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition flex items-center gap-1.5">
+                    <span>👨‍🏫 Panel Guru</span>
+                    <span id="badge-teacher-access" class="hidden text-[10px] bg-green-500 text-white px-1.5 py-0.5 rounded-full font-bold">AKTIFF</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Notification Toast Container -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow max-w-5xl w-full mx-auto px-4 py-6 sm:py-8">
+
+        <!-- =================================================================== -->
+        <!-- SECTION 1: LANDING & DATA SISWA FORM                                -->
+        <!-- =================================================================== -->
+        <section id="sec-landing" class="space-y-8 transition-all duration-300">
+            <!-- Hero Banner -->
+            <div class="relative rounded-3xl gradient-bg p-6 sm:p-10 text-white overflow-hidden shadow-xl">
+                <div class="absolute -right-10 -bottom-10 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="relative z-10 max-w-2xl space-y-4">
+                    <span class="inline-block px-3 py-1 text-xs font-semibold bg-blue-500/30 text-blue-200 rounded-full border border-blue-400/30">
+                        Rekomendasi Pendidikan SMP → SMA/SMK & Perguruan Tinggi
+                    </span>
+                    <h2 class="text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight">
+                        Ukur Potensi Diri & Pilihan Sekolah Masa Depanmu
+                    </h2>
+                    <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+                        Ikuti tes 30 pertanyaan interaktif berbasis standar <strong>RIASEC & Orientasi Vokasi/Akademik</strong>. Hasil langsung dianalisis secara instan dan tersimpan otomatis ke sistem pembimbingan Guru BK.
+                    </p>
+                    <div class="flex flex-wrap gap-4 pt-2 text-xs text-slate-300">
+                        <span class="flex items-center gap-1.5">⏱️ Est. 6-8 Menit</span>
+                        <span class="flex items-center gap-1.5">📊 30 Pertanyaan Skala Likert</span>
+                        <span class="flex items-center gap-1.5">☁️ Terintegrasi Cloud Guru BK</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Identitas Siswa -->
+            <div class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <span>📋</span> Identitas Siswa
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-1">Lengkapi data diri secara akurat sebelum memulai asesmen minat bakat.</p>
+                </div>
+
+                <form id="form-identity" onsubmit="startQuiz(event)" class="space-y-5">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="sm:col-span-1">
+                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">Nama Lengkap Siswa *</label>
+                            <input type="text" id="input-name" required placeholder="Contoh: Ananda Pratama" 
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm outline-none transition">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">Kelas *</label>
+                            <input type="text" id="input-grade" required placeholder="Contoh: 9A / 9B / 8C" 
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm outline-none transition">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">NIS / No. Absen *</label>
+                            <input type="text" id="input-nis" required placeholder="Contoh: 20240912 / Absen 14" 
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm outline-none transition">
+                        </div>
+                    </div>
+
+                    <div class="pt-3 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100">
+                        <p class="text-xs text-slate-500 italic">
+                            🔒 Data pengerjaan tes ini digunakan khusus untuk bimbingan karier di sekolah.
+                        </p>
+                        <button type="submit" 
+                            class="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/25 transition transform active:scale-95 flex items-center justify-center gap-2">
+                            <span>Mulai Tes Minat Bakat</span>
+                            <span>➔</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+
+        <!-- =================================================================== -->
+        <!-- SECTION 2: INTERACTIVE QUESTIONNAIRE (30 QUESTIONS)                  -->
+        <!-- =================================================================== -->
+        <section id="sec-quiz" class="hidden space-y-6">
+            <!-- Progress Bar Card -->
+            <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                <div class="flex justify-between items-center text-xs font-semibold text-slate-600">
+                    <span id="quiz-progress-text">Soal 1 dari 30</span>
+                    <span id="quiz-progress-percent" class="text-blue-600">3% Selesai</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                    <div id="quiz-progress-bar" class="bg-gradient-to-r from-blue-500 to-indigo-600 h-2.5 rounded-full transition-all duration-300" style="width: 3%"></div>
+                </div>
+            </div>
+
+            <!-- Question Card -->
+            <div class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <span id="question-category-tag" class="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-semibold border border-indigo-100">
+                        Dimensi: Realistic
+                    </span>
+                    <span class="text-xs text-slate-400">Pilih respons yang paling menggambarkan dirimu</span>
+                </div>
+
+                <div class="space-y-2">
+                    <h3 id="question-text" class="text-lg sm:text-xl font-bold text-slate-800 leading-snug">
+                        Memuat pertanyaan...
+                    </h3>
+                    <p id="question-subtext" class="text-xs sm:text-sm text-slate-500">
+                        Bayangkan situasi ini dalam kegiatan sehari-hari atau pelajaran di sekolah.
+                    </p>
+                </div>
+
+                <!-- Likert Options Form -->
+                <div id="options-container" class="space-y-3 pt-2">
+                    <!-- Dynamic radio options generated by JS -->
+                </div>
+
+                <!-- Navigation Controls -->
+                <div class="flex items-center justify-between pt-6 border-t border-slate-100">
+                    <button id="btn-prev" onclick="prevQuestion()" disabled
+                        class="px-5 py-2.5 rounded-xl text-sm font-medium border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                        ← Sebelumnya
+                    </button>
+                    <button id="btn-next" onclick="nextQuestion()" disabled
+                        class="px-6 py-2.5 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-md shadow-blue-500/20">
+                        Selanjutnya →
+                    </button>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- =================================================================== -->
+        <!-- SECTION 3: STUDENT RESULTS DASHBOARD                                -->
+        <!-- =================================================================== -->
+        <section id="sec-result" class="hidden space-y-8">
+            
+            <!-- Result Header Banner -->
+            <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-3 py-1 bg-green-500/20 text-green-300 text-xs font-semibold rounded-full border border-green-500/30">
+                                ✓ Asesmen Selesai
+                            </span>
+                            <span id="sync-status-badge" class="px-3 py-1 bg-blue-500/20 text-blue-200 text-xs font-semibold rounded-full border border-blue-400/30">
+                                ☁️ Menyimpan ke database...
+                            </span>
+                        </div>
+                        <h2 class="text-2xl sm:text-3xl font-extrabold mt-2">Laporan Hasil Minat Bakat Siswa</h2>
+                        <p class="text-slate-300 text-xs sm:text-sm mt-1" id="res-student-info">Nama Siswa | Kelas | NIS</p>
+                    </div>
+                    <div class="flex gap-2 no-print">
+                        <button onclick="window.print()" class="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+                            🖨️ Cetak / Simpan PDF
+                        </button>
+                        <button onclick="resetQuiz()" class="px-4 py-2 bg-white text-slate-900 hover:bg-slate-100 rounded-xl text-xs font-bold transition">
+                            🔄 Tes Ulang
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Primary Recommendation: SMA vs SMK -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Main Pathway Card -->
+                <div class="bg-white p-6 rounded-2xl border-2 border-blue-500/30 shadow-md space-y-4 relative overflow-hidden">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold uppercase tracking-wider text-blue-600">Rekomendasi Jenjang Lanjutan</span>
+                        <span id="badge-recommendation" class="px-3 py-1 bg-blue-600 text-white font-extrabold text-xs rounded-full shadow-sm">
+                            SMA
+                        </span>
+                    </div>
+
+                    <div class="space-y-1">
+                        <h3 id="text-recommendation-title" class="text-xl font-extrabold text-slate-800">
+                            Kecenderungan: SMA (Sekolah Menengah Atas)
+                        </h3>
+                        <p id="text-recommendation-sub" class="text-xs text-slate-600 leading-relaxed">
+                            Fokus pada penguasaan teori akademis, analisis ilmiah, dan persiapan melanjutkan studi perguruan tinggi.
+                        </p>
+                    </div>
+
+                    <!-- Visual Match Bar -->
+                    <div class="space-y-2 pt-2">
+                        <div class="flex justify-between text-xs font-semibold">
+                            <span class="text-slate-600">Persiapan Akademis (SMA): <strong id="val-sma-pct" class="text-blue-600">75%</strong></span>
+                            <span class="text-slate-600">Keterampilan Praktis (SMK): <strong id="val-smk-pct" class="text-indigo-600">60%</strong></span>
+                        </div>
+                        <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden flex">
+                            <div id="bar-sma" class="bg-blue-600 h-full transition-all duration-500" style="width: 55%"></div>
+                            <div id="bar-smk" class="bg-indigo-500 h-full transition-all duration-500" style="width: 45%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Recommended Tracks -->
+                    <div class="pt-2 border-t border-slate-100">
+                        <h4 class="text-xs font-bold uppercase text-slate-500 mb-2">Saran Peminatan / Program Keahlian:</h4>
+                        <ul id="list-suggested-tracks" class="space-y-1.5 text-xs font-medium text-slate-700">
+                            <!-- Filled dynamically -->
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- RIASEC Profile Radar Chart Card -->
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-800 uppercase tracking-wider">Grafik Profil Minat RIASEC</h3>
+                        <p class="text-xs text-slate-500">6 Dimensi pemetaan kecenderungan bakat & tipe kepribadian</p>
+                    </div>
+
+                    <div class="w-full h-64 flex items-center justify-center">
+                        <canvas id="riasecRadarChart"></canvas>
+                    </div>
+
+                    <div id="top-riasec-badge" class="text-center text-xs font-semibold text-slate-600 bg-slate-50 py-2 rounded-xl border border-slate-100">
+                        Kode Holland Utama: <strong id="val-holland-code" class="text-blue-600 font-extrabold">I - S - A</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIASEC Detailed Scores Breakdown -->
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <h3 class="text-base font-bold text-slate-800">📊 Rincian Skor Per Dimensi Minat</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3" id="grid-riasec-scores">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <!-- University Major Recommendations -->
+            <div class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <span>🎯</span> Rekomendasi Jurusan Perguruan Tinggi (Kuliah S1 / D4)
+                    </h3>
+                    <p class="text-xs text-slate-500">Hasil estimasi berdasarkan sintesis kombinasi minat bakat dan gaya belajarmu.</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4" id="container-majors">
+                    <!-- Dynamic Major Cards -->
+                </div>
+            </div>
+
+            <!-- Action Plan & Guidance -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-blue-50/70 p-6 rounded-2xl border border-blue-100 space-y-3">
+                    <h4 class="text-sm font-bold text-blue-900 flex items-center gap-1.5">
+                        <span>💡</span> Panduan Pengabdian & Belajar Mandiri
+                    </h4>
+                    <ul id="list-student-advice" class="space-y-2 text-xs text-blue-950 leading-relaxed list-disc pl-4">
+                        <!-- Dynamic tips -->
+                    </ul>
+                </div>
+
+                <div class="bg-amber-50/70 p-6 rounded-2xl border border-amber-100 space-y-3">
+                    <h4 class="text-sm font-bold text-amber-900 flex items-center gap-1.5">
+                        <span>👨‍🏫</span> Catatan Konseling Guru BK & Orang Tua
+                    </h4>
+                    <ul id="list-parent-advice" class="space-y-2 text-xs text-amber-950 leading-relaxed list-disc pl-4">
+                        <!-- Dynamic tips -->
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- =================================================================== -->
+        <!-- SECTION 4: TEACHER / ADMIN DASHBOARD PANEL                         -->
+        <!-- =================================================================== -->
+        <section id="sec-admin" class="hidden space-y-6">
+            
+            <!-- Dashboard Banner -->
+            <div class="bg-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 text-xs font-bold rounded-lg border border-emerald-500/30">
+                            👨‍🏫 Mode Guru BK / Administrator
+                        </span>
+                        <span class="text-xs text-slate-400">Sinkronisasi Real-time</span>
+                    </div>
+                    <h2 class="text-xl sm:text-2xl font-extrabold mt-1">Dashboard Rekap Hasil Minat Bakat</h2>
+                    <p class="text-xs text-slate-400">Pantau perkembangan tes seluruh siswa SMP secara kolektif.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="exportToCSV()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow transition flex items-center gap-1.5">
+                        <span>📥 Export ke Excel / CSV</span>
+                    </button>
+                    <button onclick="lockTeacherPanel()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-xl text-xs font-medium transition">
+                        🔒 Keluar Panel
+                    </button>
+                </div>
+            </div>
+
+            <!-- Summary Stats Cards -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                    <p class="text-xs text-slate-500 font-semibold uppercase">Total Siswa Mengisi</p>
+                    <h3 id="stat-total-students" class="text-2xl font-extrabold text-slate-800">0</h3>
+                    <p class="text-[11px] text-slate-400">Tersimpan di Cloud</p>
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-sm space-y-1">
+                    <p class="text-xs text-blue-600 font-semibold uppercase">Rekomendasi SMA</p>
+                    <h3 id="stat-total-sma" class="text-2xl font-extrabold text-blue-700">0</h3>
+                    <p id="stat-pct-sma" class="text-[11px] font-semibold text-blue-600">0% dari total</p>
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl border border-indigo-200 bg-indigo-50/20 shadow-sm space-y-1">
+                    <p class="text-xs text-indigo-600 font-semibold uppercase">Rekomendasi SMK</p>
+                    <h3 id="stat-total-smk" class="text-2xl font-extrabold text-indigo-700">0</h3>
+                    <p id="stat-pct-smk" class="text-[11px] font-semibold text-indigo-600">0% dari total</p>
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                    <p class="text-xs text-slate-500 font-semibold uppercase">Kode Dominan</p>
+                    <h3 id="stat-top-holland" class="text-2xl font-extrabold text-emerald-600">-</h3>
+                    <p class="text-[11px] text-slate-400">Tipe Kepribadian</p>
+                </div>
+            </div>
+
+            <!-- Filters & Search Toolbar -->
+            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-3 items-center justify-between">
+                <div class="flex flex-1 w-full sm:w-auto gap-3">
+                    <div class="relative flex-1">
+                        <input type="text" id="admin-search-input" oninput="filterTeacherTable()" placeholder="🔍 Cari Nama Siswa / NIS..." 
+                            class="w-full pl-3 pr-4 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                    <select id="admin-filter-class" onchange="filterTeacherTable()" 
+                        class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none font-medium">
+                        <option value="ALL">Semua Kelas</option>
+                        <!-- Options generated dynamically -->
+                    </select>
+                </div>
+
+                <div class="text-xs text-slate-500 font-medium">
+                    Menampilkan <span id="admin-table-count" class="font-bold text-slate-800">0</span> data siswa
+                </div>
+            </div>
+
+            <!-- Student Submissions Data Table -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-slate-100/80 border-b border-slate-200 text-slate-700 uppercase font-bold text-[11px]">
+                                <th class="py-3 px-4">Waktu</th>
+                                <th class="py-3 px-4">Nama Siswa</th>
+                                <th class="py-3 px-4">Kelas</th>
+                                <th class="py-3 px-4">NIS</th>
+                                <th class="py-3 px-4 text-center">Rekomendasi</th>
+                                <th class="py-3 px-4 text-center">Kode Holland</th>
+                                <th class="py-3 px-4">Jurusan Utama</th>
+                                <th class="py-3 px-4 text-center">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-teacher-rows" class="divide-y divide-slate-100 text-slate-700">
+                            <tr>
+                                <td colspan="8" class="py-8 text-center text-slate-400">
+                                    Memuat data rekap siswa dari Firestore...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- =================================================================== -->
+    <!-- MODALS & POPUPS                                                     -->
+    <!-- =================================================================== -->
+
+    <!-- PIN Authentication Modal for Teacher Access -->
+    <div id="modal-teacher-pin" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl p-6 sm:p-8 max-w-sm w-full shadow-2xl space-y-5 border border-slate-100">
+            <div class="text-center space-y-2">
+                <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto text-2xl font-bold">
+                    🔑
+                </div>
+                <h3 class="text-lg font-bold text-slate-800">Verifikasi Akses Guru</h3>
+                <p class="text-xs text-slate-500">Masukkan PIN Keamanan untuk membuka Rekap Data Siswa.</p>
+            </div>
+
+            <form onsubmit="verifyTeacherPIN(event)" class="space-y-4">
+                <div>
+                    <input type="password" id="input-teacher-pin" required placeholder="Masukkan PIN (Default: 1234)" autofocus
+                        class="w-full px-4 py-3 text-center text-lg font-bold tracking-widest rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+
+                <div class="p-2.5 bg-blue-50 text-blue-800 text-[11px] rounded-xl border border-blue-100 text-center">
+                    💡 <strong>Petunjuk:</strong> Gunakan PIN default <strong>1234</strong> untuk pengujian.
+                </div>
+
+                <div class="flex gap-2">
+                    <button type="button" onclick="closeTeacherPinModal()" class="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">
+                        Batal
+                    </button>
+                    <button type="submit" class="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-md shadow-blue-500/20">
+                        Masuk Dashboard
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Student Detail View Modal (Used in Teacher Dashboard) -->
+    <div id="modal-student-detail" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 sm:p-8 space-y-6 shadow-2xl relative my-8 border border-slate-200">
+            
+            <button onclick="closeStudentDetailModal()" class="absolute top-5 right-5 text-slate-400 hover:text-slate-700 text-xl font-bold p-2">
+                ✕
+            </button>
+
+            <div class="border-b border-slate-100 pb-4">
+                <span class="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-bold rounded-md">Detail Rekap Siswa</span>
+                <h3 id="modal-detail-name" class="text-xl font-extrabold text-slate-800 mt-1">Nama Siswa</h3>
+                <p id="modal-detail-meta" class="text-xs text-slate-500">Kelas: 9A | NIS: 12345 | Waktu: 24/11/2026</p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                    <span class="text-[11px] font-bold text-slate-400 uppercase">Hasil Rekomendasi Utama</span>
+                    <div id="modal-detail-rec-badge" class="text-lg font-extrabold text-blue-600">SMA (75%) vs SMK (60%)</div>
+                    <ul id="modal-detail-tracks" class="text-xs space-y-1 text-slate-700 font-medium"></ul>
+                </div>
+
+                <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-center">
+                    <span class="text-[11px] font-bold text-slate-400 uppercase">Kode Holland (RIASEC)</span>
+                    <div id="modal-detail-holland" class="text-2xl font-black text-indigo-600">I - S - A</div>
+                    <div class="h-40 w-full flex items-center justify-center pt-1">
+                        <canvas id="modalDetailRadarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <h4 class="text-xs font-bold uppercase text-slate-500">Rekomendasi Jurusan Kuliah:</h4>
+                <div id="modal-detail-majors" class="grid grid-cols-1 sm:grid-cols-3 gap-2"></div>
+            </div>
+
+            <div class="flex justify-end pt-4 border-t border-slate-100">
+                <button onclick="closeStudentDetailModal()" class="px-5 py-2 bg-slate-800 text-white text-xs font-semibold rounded-xl hover:bg-slate-700 transition">
+                    Tutup Detail
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal (Custom alert/confirm replacement) -->
+    <div id="modal-confirm" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4 border border-slate-100 text-center">
+            <div class="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">
+                ⚠️
+            </div>
+            <h4 id="confirm-title" class="text-base font-bold text-slate-800">Hapus Data Siswa?</h4>
+            <p id="confirm-desc" class="text-xs text-slate-500">Tindakan ini tidak dapat dibatalkan.</p>
+            <div class="flex gap-2 pt-2">
+                <button id="btn-confirm-cancel" class="flex-1 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">
+                    Batal
+                </button>
+                <button id="btn-confirm-ok" class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition">
+                    Ya, Hapus
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500 mt-10 no-print">
+        <div class="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+            <p>© 2026 EduPath SMP - Sistem Asesmen Minat Bakat & Penjurusan Sekolah</p>
+            <p class="text-slate-400">Dirancang untuk Konseling BK & Pembimbingan Karier Siswa</p>
+        </div>
+    </footer>
+
+
+    <!-- =================================================================== -->
+    <!-- JAVASCRIPT APPLICATION LOGIC                                        -->
+    <!-- =================================================================== -->
+    <script>
+        /* ---------------------------------------------------------------------
+           1. QUESTIONNAIRE DATASET (30 Questions: 24 RIASEC + 6 SMA/SMK Orientation)
+           --------------------------------------------------------------------- */
+        const questionsData = [
+            // REALISTIC (R)
+            { id: 1, cat: 'R', catName: 'Realistic (Praktis & Mekanis)', smaSmk: 'SMK', text: "Saya suka merakit, memperbaiki, atau membongkar barang elektronik/peralatan rumah yang rusak.", subtext: "Misal: memperbaiki rantai sepeda, colokan listrik, atau bongkar pasang mainan/perangkat." },
+            { id: 2, cat: 'R', catName: 'Realistic (Praktis & Mekanis)', smaSmk: 'SMK', text: "Saya lebih cepat paham jika belajar langsung memegang alat dan mempraktikkannya daripada sekadar membaca buku teori.", subtext: "Misal: Praktikum di bengkel/laboratorium lapangan lebih seru dibanding menghafal." },
+            { id: 3, cat: 'R', catName: 'Realistic (Praktis & Mekanis)', smaSmk: 'SMK', text: "Saya menyukai kegiatan luar ruangan yang mengandalkan keterampilan fisik dan kekuatan tangan.", subtext: "Misal: berkebun, pertukangan kayu, merawat hewan, atau olahraga outdoor." },
+            { id: 4, cat: 'R', catName: 'Realistic (Praktis & Mekanis)', smaSmk: 'SMK', text: "Saya penasaran ingin tahu cara kerja internal mesin, kendaraan motor, atau komponen perangkat keras komputer.", subtext: "Misal: Tertarik bagaimana mesin motor bergerak atau proses perakitan komponen PC." },
+
+            // INVESTIGATIVE (I)
+            { id: 5, cat: 'I', catName: 'Investigative (Analitis & Sains)', smaSmk: 'SMA', text: "Saya senang menganalisis rumus Matematika atau IPA sampai benar-benar paham alasan logis di baliknya.", subtext: "Misal: Mempertanyakan 'mengapa' suatu hukum fisika/reaksi kimia bisa terjadi." },
+            { id: 6, cat: 'I', catName: 'Investigative (Analitis & Sains)', smaSmk: 'SMA', text: "Saya hobi membaca sains, ensiklopedia, fakta alam, atau berita riset teknologi terbaru.", subtext: "Misal: Menyukai artikel tentang antariksa, biologi molekuler, atau penemuan medis." },
+            { id: 7, cat: 'I', catName: 'Investigative (Analitis & Sains)', smaSmk: 'SMA', text: "Saya merasa tertantang dan senang saat memecahkan soal teka-teki logika atau teka-teki pola angka yang rumit.", subtext: "Misal: Sudoku, teka-teki logika sains, atau pemograman/coding algoritma dasar." },
+            { id: 8, cat: 'I', catName: 'Investigative (Analitis & Sains)', smaSmk: 'SMA', text: "Saya tertarik melakukan pengamatan mandiri (observasi) atau eksperimen ilmiah untuk menemukan fakta baru.", subtext: "Misal: Meneliti pertumbuhan tanaman di bawah sinar cahaya berbeda." },
+
+            // ARTISTIC (A)
+            { id: 9, cat: 'A', catName: 'Artistic (Kreatif & Seni)', smaSmk: 'SMK', text: "Saya sering menggunakan waktu luang untuk menggambar, mendesain grafis, membuat ilustrasi, atau mengedit video.", subtext: "Misal: Menggambar manga/komik, desain poster Canva, atau edit video TikTok/Reels." },
+            { id: 10, cat: 'A', catName: 'Artistic (Kreatif & Seni)', smaSmk: 'SMA', text: "Saya suka mengekspresikan imajinasi melalui tulisan cerita, puisi, karya seni musik, atau pertunjukan peran.", subtext: "Misal: Menulis cerita cerpen/wattpad, bermain alat musik, atau seni teater." },
+            { id: 11, cat: 'A', catName: 'Artistic (Kreatif & Seni)', smaSmk: 'SMA', text: "Saat ada tugas sekolah, saya selalu mencari ide unik dan tampil beda (out-of-the-box) dibanding teman-teman.", subtext: "Misal: Membuat presentasi visual yang estetik dan cerita pendek yang kreatif." },
+            { id: 12, cat: 'A', catName: 'Artistic (Kreatif & Seni)', smaSmk: 'SMK', text: "Saya merasa lebih bersemangat jika diberi kebebasan berkreasi tanpa aturan baku yang terlalu mengikat.", subtext: "Misal: Lebih suka tugas proyek kreatif dibanding mengerjakan soal ujian tertulis formal." },
+
+            // SOCIAL (S)
+            { id: 13, cat: 'S', catName: 'Social (Sosial & Mengedukasi)', smaSmk: 'SMA', text: "Saya dengan senang hati mengajari dan menjelaskan pelajaran yang sulit kepada teman sekelas yang belum paham.", subtext: "Misal: Menjadi tutor sebaya untuk teman belajar Matematika atau Bahasa Inggris." },
+            { id: 14, cat: 'S', catName: 'Social (Sosial & Mengedukasi)', smaSmk: 'SMA', text: "Saya aktif atau tertarik bergabung dalam kegiatan kemanusiaan/sosial seperti PMR, Pramuka, atau bakti sosial.", subtext: "Misal: Suka membantu orang lain yang sedang kesusahan atau tertimpa bencana." },
+            { id: 15, cat: 'S', catName: 'Social (Sosial & Mengedukasi)', smaSmk: 'SMA', text: "Teman-teman sering mendatangi saya untuk curhat dan meminta saran atas masalah pribadi yang mereka alami.", subtext: "Misal: Menjadi pendengar yang baik dan peka terhadap perasaan teman." },
+            { id: 16, cat: 'S', catName: 'Social (Sosial & Mengedukasi)', smaSmk: 'SMK', text: "Cita-cita saya berkaitan erat dengan pelayanan masyarakat, kesehatan, pendampingan, atau pengajaran.", subtext: "Misal: Menginginkan profesi guru, psikolog, perawat, atau pekerja sosial." },
+
+            // ENTERPRISING (E)
+            { id: 17, cat: 'E', catName: 'Enterprising (Kepemimpinan & Bisnis)', smaSmk: 'SMA', text: "Saya berani memimpin kelompok, mengarahkan pembagian tugas, dan mengambil keputusan saat kerja kelompok.", subtext: "Misal: Menjadi ketua kelompok, pengurus kelas, atau pengurus OSIS." },
+            { id: 18, cat: 'E', catName: 'Enterprising (Kepemimpinan & Bisnis)', smaSmk: 'SMK', text: "Saya tertarik dengan dunia jualan, wirausaha, promosi barang, dan mencari cara mendapatkan keuntungan.", subtext: "Misal: Pernah/suka berjualan makanan di sekolah, jualan online, atau mengelola barang dagangan." },
+            { id: 19, cat: 'E', catName: 'Enterprising (Kepemimpinan & Bisnis)', smaSmk: 'SMA', text: "Saya percaya diri saat harus bicara di depan banyak orang (public speaking) atau presentasi di depan kelas.", subtext: "Misal: Tidak demam panggung saat menyampaikan argumen di depan forum." },
+            { id: 20, cat: 'E', catName: 'Enterprising (Kepemimpinan & Bisnis)', smaSmk: 'SMA', text: "Saya mampu meyakinkan dan membujuk orang lain untuk menyetujui ide atau rencana yang saya usulkan.", subtext: "Misal: Pandai bernegosiasi dan memberikan ide yang persuasif." },
+
+            // CONVENTIONAL (C)
+            { id: 21, cat: 'C', catName: 'Conventional (Terstruktur & Administrasi)', smaSmk: 'SMK', text: "Saya sangat suka kerapian, mencatat jadwal harian, dan mengatur dokumen/catatan sekolah secara teratur.", subtext: "Misal: Catatan binder/buku pelajaran rapi bertema warna, file HP/laptop tertata dalam folder." },
+            { id: 22, cat: 'C', catName: 'Conventional (Terstruktur & Administrasi)', smaSmk: 'SMK', text: "Saya teliti dalam mengelola pencatatan uang kas kelas, menghitung anggaran belanja, atau data tabel.", subtext: "Misal: Senang menjadi bendahara kelas dan memastikan angka perhitungan tidak ada yang meleset." },
+            { id: 23, cat: 'C', catName: 'Conventional (Terstruktur & Administrasi)', smaSmk: 'SMK', text: "Saya merasa lebih aman dan nyaman bekerja mengikuti aturan baku serta panduan petunjuk (SOP) yang jelas.", subtext: "Misal: Lebih suka petunjuk pengerjaan tugas yang jelas instruksinya dari guru." },
+            { id: 24, cat: 'C', catName: 'Conventional (Terstruktur & Administrasi)', smaSmk: 'SMK', text: "Saya adalah orang yang cermat terhadap detail kecil dan jarang melakukan kecerobohan saat memasukkan data.", subtext: "Misal: Memeriksa kembali lembar jawaban sebelum dikumpulkan agar tidak ada yang terlewat." },
+
+            // ORIENTASI SMA VS SMK & GAYA BELAJAR (6 Questions)
+            { id: 25, cat: 'ORI_SMA', catName: 'Orientasi Akademis (SMA)', smaSmk: 'SMA', text: "Saya berniat melanjutkan pendidikan hingga jenjang Kuliah Perguruan Tinggi (Sarjana S1) segera setelah lulus sekolah menengah.", subtext: "Orientasi melanjutkan studi akademis tingkat tinggi." },
+            { id: 26, cat: 'ORI_SMK', catName: 'Orientasi Keahlian (SMK)', smaSmk: 'SMK', text: "Saya ingin langsung memiliki keahlian spesifik agar siap bekerja atau berwirausaha mandiri setelah lulus dari sekolah menengah.", subtext: "Orientasi kesiapan kerja cepat & kompetensi keahlian praktis." },
+            { id: 27, cat: 'ORI_SMA', catName: 'Orientasi Akademis (SMA)', smaSmk: 'SMA', text: "Saya menyukai tantangan mempelajari teori abstrak, pemikiran konsep mendalam, dan soal ujian standar nasional.", subtext: "Preferensi metode pembelajaran teoritis ilmiah." },
+            { id: 28, cat: 'ORI_SMK', catName: 'Orientasi Keahlian (SMK)', smaSmk: 'SMK', text: "Saya lebih menikmati ujian berbasis Produk Karya / Praktik Industri (PKL) dibanding ujian materi hafalan kertas.", subtext: "Preferensi metode penilaian unjuk kerja / sertifikasi." },
+            { id: 29, cat: 'ORI_SMA', catName: 'Orientasi Akademis (SMA)', smaSmk: 'SMA', text: "Saya lebih menyukai fleksibilitas memilih banyak pilihan jurusan kuliah yang luas sebelum menentukan spesialisasi.", subtext: "Fokus pada pendalaman umum ilmu pengetahuan." },
+            { id: 30, cat: 'ORI_SMK', catName: 'Orientasi Keahlian (SMK)', smaSmk: 'SMK', text: "Saya bersemangat jika sekolah memfasilitasi magang di laboratorium, pabrik, atau studio perusahaan profesional.", subtext: "Keinginan terlibat dalam pengalaman kerja nyata." }
+        ];
+
+        /* ---------------------------------------------------------------------
+           2. GLOBAL STATE VARIABLES
+           --------------------------------------------------------------------- */
+        let studentProfile = { name: '', grade: '', nis: '' };
+        let currentQuestionIdx = 0;
+        let answers = new Array(questionsData.length).fill(null);
+        let studentRadarChartInstance = null;
+        let modalRadarChartInstance = null;
+        let teacherSubmissionsCache = [];
+        let isTeacherLoggedIn = false;
+
+        /* ---------------------------------------------------------------------
+           3. UI TOAST & MODAL HELPERS (Without using alert/confirm)
+           --------------------------------------------------------------------- */
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const bg = type === 'success' ? 'bg-emerald-600' : (type === 'error' ? 'bg-red-600' : 'bg-slate-800');
+            toast.className = `${bg} text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold flex items-center gap-2 transform transition-all duration-300 pointer-events-auto opacity-0 translate-y-2`;
+            toast.innerHTML = `<span>${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span> <span>${message}</span>`;
+            
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.remove('opacity-0', 'translate-y-2');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function customConfirm(title, desc, onConfirm) {
+            const modal = document.getElementById('modal-confirm');
+            document.getElementById('confirm-title').innerText = title;
+            document.getElementById('confirm-desc').innerText = desc;
+            
+            const btnOk = document.getElementById('btn-confirm-ok');
+            const btnCancel = document.getElementById('btn-confirm-cancel');
+
+            const cleanup = () => {
+                modal.classList.add('hidden');
+                btnOk.onclick = null;
+                btnCancel.onclick = null;
+            };
+
+            btnOk.onclick = () => { cleanup(); onConfirm(); };
+            btnCancel.onclick = () => cleanup();
+            modal.classList.remove('hidden');
+        }
+
+        /* ---------------------------------------------------------------------
+           4. NAVIGATION & TAB SWITCHING
+           --------------------------------------------------------------------- */
+        function switchTab(tab) {
+            const secLanding = document.getElementById('sec-landing');
+            const secQuiz = document.getElementById('sec-quiz');
+            const secResult = document.getElementById('sec-result');
+            const secAdmin = document.getElementById('sec-admin');
+
+            const btnStudent = document.getElementById('nav-btn-student');
+            const btnTeacher = document.getElementById('nav-btn-teacher');
+
+            if (tab === 'student') {
+                secAdmin.classList.add('hidden');
+                btnTeacher.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition flex items-center gap-1.5";
+                btnStudent.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 transition";
+
+                if (answers.some(a => a !== null)) {
+                    if (currentQuestionIdx >= questionsData.length - 1 && answers.every(a => a !== null)) {
+                        secResult.classList.remove('hidden');
+                    } else {
+                        secQuiz.classList.remove('hidden');
+                    }
+                } else {
+                    secLanding.classList.remove('hidden');
+                }
+            } else if (tab === 'teacher') {
+                if (!isTeacherLoggedIn) {
+                    openTeacherLoginModal();
+                    return;
+                }
+                secLanding.classList.add('hidden');
+                secQuiz.classList.add('hidden');
+                secResult.classList.add('hidden');
+                secAdmin.classList.remove('hidden');
+
+                btnStudent.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition";
+                btnTeacher.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 transition flex items-center gap-1.5";
+                
+                // Refresh teacher UI
+                renderTeacherDashboard();
+            }
+        }
+
+        function openTeacherLoginModal() {
+            if (isTeacherLoggedIn) {
+                switchTab('teacher');
+            } else {
+                document.getElementById('modal-teacher-pin').classList.remove('hidden');
+                document.getElementById('input-teacher-pin').focus();
+            }
+        }
+
+        function closeTeacherPinModal() {
+            document.getElementById('modal-teacher-pin').classList.add('hidden');
+        }
+
+        function verifyTeacherPIN(e) {
+            e.preventDefault();
+            const pin = document.getElementById('input-teacher-pin').value.trim();
+            if (pin === '1234') {
+                isTeacherLoggedIn = true;
+                closeTeacherPinModal();
+                document.getElementById('badge-teacher-access').classList.remove('hidden');
+                showToast("Akses Guru Berhasil Diverifikasi!", "success");
+                switchTab('teacher');
+            } else {
+                showToast("PIN Salah! Gunakan PIN: 1234", "error");
+            }
+        }
+
+        function lockTeacherPanel() {
+            isTeacherLoggedIn = false;
+            document.getElementById('badge-teacher-access').classList.add('hidden');
+            showToast("Panel Guru terkunci.", "info");
+            switchTab('student');
+        }
+
+        /* ---------------------------------------------------------------------
+           5. STUDENT QUIZ ENGINE
+           --------------------------------------------------------------------- */
+        function startQuiz(event) {
+            event.preventDefault();
+            const name = document.getElementById('input-name').value.trim();
+            const grade = document.getElementById('input-grade').value.trim();
+            const nis = document.getElementById('input-nis').value.trim();
+
+            if (!name || !grade || !nis) {
+                showToast("Harap isi Nama, Kelas, dan NIS secara lengkap.", "error");
+                return;
+            }
+
+            studentProfile.name = name;
+            studentProfile.grade = grade;
+            studentProfile.nis = nis;
+
+            document.getElementById('sec-landing').classList.add('hidden');
+            document.getElementById('sec-quiz').classList.remove('hidden');
+
+            currentQuestionIdx = 0;
+            renderQuestion();
+        }
+
+        function renderQuestion() {
+            const q = questionsData[currentQuestionIdx];
+            const total = questionsData.length;
+            const currentNum = currentQuestionIdx + 1;
+            const pct = Math.round((currentNum / total) * 100);
+
+            document.getElementById('quiz-progress-text').innerText = `Soal ${currentNum} dari ${total}`;
+            document.getElementById('quiz-progress-percent').innerText = `${pct}% Selesai`;
+            document.getElementById('quiz-progress-bar').style.width = `${pct}%`;
+
+            document.getElementById('question-category-tag').innerText = `Kategori: ${q.catName}`;
+            document.getElementById('question-text').innerText = `${currentNum}. ${q.text}`;
+            document.getElementById('question-subtext').innerText = q.subtext;
+
+            const optionsContainer = document.getElementById('options-container');
+            optionsContainer.innerHTML = '';
+
+            const likertOptions = [
+                { val: 1, label: 'Sangat Tidak Suka / Sangat Tidak Setuju', color: 'hover:border-red-300 hover:bg-red-50' },
+                { val: 2, label: 'Tidak Suka / Agak Ragu', color: 'hover:border-orange-300 hover:bg-orange-50' },
+                { val: 3, label: 'Netral / Cukup Suka', color: 'hover:border-slate-300 hover:bg-slate-50' },
+                { val: 4, label: 'Suka / Setuju', color: 'hover:border-blue-300 hover:bg-blue-50' },
+                { val: 5, label: 'Sangat Suka / Sangat Setuju', color: 'hover:border-green-300 hover:bg-green-50' }
+            ];
+
+            const selectedVal = answers[currentQuestionIdx];
+
+            likertOptions.forEach(opt => {
+                const isSelected = selectedVal === opt.val;
+                const optDiv = document.createElement('div');
+                optDiv.className = `p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                    isSelected 
+                        ? 'border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/30' 
+                        : 'border-slate-200 bg-white ' + opt.color
+                }`;
+                optDiv.onclick = () => selectOption(opt.val);
+
+                optDiv.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            isSelected ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
+                        }">
+                            ${isSelected ? '<div class="w-2 h-2 rounded-full bg-white"></div>' : ''}
+                        </div>
+                        <span class="text-xs sm:text-sm font-medium ${isSelected ? 'text-blue-900 font-semibold' : 'text-slate-700'}">
+                            ${opt.label}
+                        </span>
+                    </div>
+                    <span class="text-xs font-bold ${isSelected ? 'text-blue-600' : 'text-slate-400'}">${opt.val} Poin</span>
+                `;
+                optionsContainer.appendChild(optDiv);
+            });
+
+            document.getElementById('btn-prev').disabled = currentQuestionIdx === 0;
+            const btnNext = document.getElementById('btn-next');
+            btnNext.disabled = answers[currentQuestionIdx] === null;
+
+            if (currentQuestionIdx === total - 1) {
+                btnNext.innerText = "Lihat Hasil Analisis ✨";
+                btnNext.className = "px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition shadow-md shadow-emerald-500/20";
+            } else {
+                btnNext.innerText = "Selanjutnya →";
+                btnNext.className = "px-6 py-2.5 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition shadow-md shadow-blue-500/20";
+            }
+        }
+
+        function selectOption(val) {
+            answers[currentQuestionIdx] = val;
+            renderQuestion();
+        }
+
+        function nextQuestion() {
+            if (answers[currentQuestionIdx] === null) return;
+
+            if (currentQuestionIdx < questionsData.length - 1) {
+                currentQuestionIdx++;
+                renderQuestion();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                calculateAndShowResults();
+            }
+        }
+
+        function prevQuestion() {
+            if (currentQuestionIdx > 0) {
+                currentQuestionIdx--;
+                renderQuestion();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+           6. CALCULATE RESULTS & SAVE TO FIRESTORE
+           --------------------------------------------------------------------- */
+        function calculateAndShowResults() {
+            const scores = { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 };
+            let smaScore = 0;
+            let smkScore = 0;
+
+            answers.forEach((val, idx) => {
+                const q = questionsData[idx];
+                if (scores[q.cat] !== undefined) {
+                    scores[q.cat] += val;
+                }
+
+                if (q.smaSmk === 'SMA') smaScore += val;
+                if (q.smaSmk === 'SMK') smkScore += val;
+            });
+
+            // Percentages RIASEC (Max 20 per cat)
+            const percentages = {};
+            for (let cat in scores) {
+                percentages[cat] = Math.round(((scores[cat] - 4) / 16) * 100);
+                if (percentages[cat] < 0) percentages[cat] = 0;
+            }
+
+            // SMA vs SMK calculation
+            const maxSmaPossible = 15 * 5;
+            const maxSmkPossible = 15 * 5;
+            const smaPct = Math.round((smaScore / maxSmaPossible) * 100);
+            const smkPct = Math.round((smkScore / maxSmkPossible) * 100);
+
+            const sortedCats = Object.keys(percentages).sort((a, b) => percentages[b] - percentages[a]);
+            const hollandCode = sortedCats.slice(0, 3).join('');
+            const isSMA = smaPct >= smkPct;
+            const recommendationLabel = isSMA ? 'SMA' : 'SMK';
+
+            // UI Display
+            document.getElementById('sec-quiz').classList.add('hidden');
+            document.getElementById('sec-result').classList.remove('hidden');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+
+            document.getElementById('res-student-info').innerText = 
+                `Nama Siswa: ${studentProfile.name} | Kelas: ${studentProfile.grade} | NIS: ${studentProfile.nis}`;
+
+            document.getElementById('val-sma-pct').innerText = `${smaPct}%`;
+            document.getElementById('val-smk-pct').innerText = `${smkPct}%`;
+            document.getElementById('bar-sma').style.width = `${smaPct}%`;
+            document.getElementById('bar-smk').style.width = `${smkPct}%`;
+
+            const badgeRec = document.getElementById('badge-recommendation');
+            const recTitle = document.getElementById('text-recommendation-title');
+            const recSub = document.getElementById('text-recommendation-sub');
+
+            if (isSMA) {
+                badgeRec.innerText = 'REKOMENDASI: SMA';
+                badgeRec.className = 'px-3 py-1 bg-blue-600 text-white font-extrabold text-xs rounded-full shadow-sm';
+                recTitle.innerText = 'Kecenderungan Utama: SMA (Sekolah Menengah Atas)';
+                recSub.innerText = 'Profilmu menunjukkan ketertarikan kuat pada pendalaman teori akademik, analisis ilmiah, dan persiapan kuliah perguruan tinggi.';
+            } else {
+                badgeRec.innerText = 'REKOMENDASI: SMK';
+                badgeRec.className = 'px-3 py-1 bg-indigo-600 text-white font-extrabold text-xs rounded-full shadow-sm';
+                recTitle.innerText = 'Kecenderungan Utama: SMK (Sekolah Menengah Kejuruan)';
+                recSub.innerText = 'Profilmu menunjukkan orientasi pada praktik langsung, penguasaan keterampilan siap kerja, dan pembelajaran keahlian terapan.';
+            }
+
+            document.getElementById('list-suggested-tracks').innerHTML = getTrackSuggestions(sortedCats, isSMA);
+            renderRadarChart('riasecRadarChart', percentages, (chart) => studentRadarChartInstance = chart);
+            renderScoreBreakdown(percentages);
+            const majors = renderMajorRecommendations(sortedCats, 'container-majors');
+            renderGuidanceTips(sortedCats, isSMA);
+
+            // Save payload to Firestore
+            saveSubmissionToFirestore({
+                studentProfile,
+                timestamp: new Date().toISOString(),
+                formattedTime: new Date().toLocaleString('id-ID'),
+                scores: percentages,
+                smaPct,
+                smkPct,
+                recommendation: recommendationLabel,
+                hollandCode,
+                topMajors: majors.map(m => m.title)
+            });
+        }
+
+        async function saveSubmissionToFirestore(data) {
+            const badge = document.getElementById('sync-status-badge');
+            badge.innerText = '☁️ Menyimpan ke database...';
+            badge.className = 'px-3 py-1 bg-amber-500/20 text-amber-200 text-xs font-semibold rounded-full border border-amber-400/30';
+
+            try {
+                if (!window.db || !window.firestoreMethods) {
+                    throw new Error("Firestore not initialized");
+                }
+                const { collection, doc, setDoc } = window.firestoreMethods;
+                const docId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+                const colRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'submissions');
+                
+                await setDoc(doc(colRef, docId), { ...data, id: docId });
+
+                badge.innerText = '☁️ Data Tersimpan di Database Guru';
+                badge.className = 'px-3 py-1 bg-green-500/20 text-green-300 text-xs font-semibold rounded-full border border-green-500/30';
+                showToast("Hasil tes berhasil tersimpan ke sistem Guru BK!", "success");
+            } catch (err) {
+                console.error("Firestore Save Error:", err);
+                badge.innerText = '⚠️ Mode Lokal (Gagal Simpan Database)';
+                badge.className = 'px-3 py-1 bg-red-500/20 text-red-300 text-xs font-semibold rounded-full border border-red-500/30';
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+           7. DYNAMIC RECOMMENDATIONS & CHART RENDERING
+           --------------------------------------------------------------------- */
+        function getTrackSuggestions(sortedCats, isSMA) {
+            const top1 = sortedCats[0];
+            const top2 = sortedCats[1];
+
+            if (isSMA) {
+                let tracks = [];
+                if (top1 === 'I' || top2 === 'I' || top1 === 'R') {
+                    tracks.push("✨ <strong>Peminatan MIPA / IPA:</strong> Fokus Matematika Lanjut, Biologi, Fisika, Kimia.");
+                }
+                if (top1 === 'S' || top1 === 'E' || top1 === 'C' || top2 === 'S') {
+                    tracks.push("✨ <strong>Peminatan IPS / Sosial:</strong> Fokus Sosiologi, Ekonomi, Geografi, Sejarah.");
+                }
+                if (top1 === 'A' || top2 === 'A') {
+                    tracks.push("✨ <strong>Peminatan Bahasa & Seni:</strong> Fokus Sastra, Bahasa Asing, Komunikasi.");
+                }
+                if (tracks.length === 0) tracks.push("✨ <strong>Kelompok Pilihan Kurikulum Merdeka:</strong> Kombinasi IPA & Ekonomi.");
+                return tracks.map(t => `<li class="flex items-start gap-1.5">${t}</li>`).join('');
+            } else {
+                let smkTracks = [];
+                if (top1 === 'R' || top2 === 'R') {
+                    smkTracks.push("🛠️ <strong>Teknik & TIK:</strong> Teknik Otomotif, TKJ, Rekayasa Perangkat Lunak.");
+                }
+                if (top1 === 'A' || top2 === 'A') {
+                    smkTracks.push("🎨 <strong>Seni & Ekonomi Kreatif:</strong> Desain Komunikasi Visual (DKV), Animasi, Tata Busana.");
+                }
+                if (top1 === 'C' || top1 === 'E' || top2 === 'C') {
+                    smkTracks.push("💼 <strong>Bisnis & Perkantoran:</strong> Akuntansi Keuangan, Pemasaran Digital, OTKP.");
+                }
+                if (top1 === 'S' || top2 === 'S') {
+                    smkTracks.push("🏨 <strong>Pariwisata & Layanan:</strong> Perhotelan, Tata Boga, Layanan Kesehatan.");
+                }
+                if (smkTracks.length === 0) smkTracks.push("🛠️ <strong>Teknologi Komputer & Bisnis Digital</strong>");
+                return smkTracks.slice(0, 3).map(t => `<li class="flex items-start gap-1.5">${t}</li>`).join('');
+            }
+        }
+
+        function renderScoreBreakdown(percentages) {
+            const container = document.getElementById('grid-riasec-scores');
+            container.innerHTML = '';
+
+            const catNames = { R: 'Realistic', I: 'Investigative', A: 'Artistic', S: 'Social', E: 'Enterprising', C: 'Conventional' };
+            const colors = {
+                R: 'bg-amber-50 text-amber-700 border-amber-200',
+                I: 'bg-blue-50 text-blue-700 border-blue-200',
+                A: 'bg-purple-50 text-purple-700 border-purple-200',
+                S: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                E: 'bg-rose-50 text-rose-700 border-rose-200',
+                C: 'bg-slate-50 text-slate-700 border-slate-200'
+            };
+
+            for (let cat in percentages) {
+                const val = percentages[cat];
+                const card = document.createElement('div');
+                card.className = `p-3 rounded-xl border text-center space-y-1 ${colors[cat]}`;
+                card.innerHTML = `
+                    <div class="text-[10px] font-bold uppercase tracking-wider opacity-80">${catNames[cat]}</div>
+                    <div class="text-xl font-extrabold">${val}%</div>
+                `;
+                container.appendChild(card);
+            }
+        }
+
+        function renderRadarChart(canvasId, percentages, setInstanceCallback) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            
+            const newChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: ['Realistic (R)', 'Investigative (I)', 'Artistic (A)', 'Social (S)', 'Enterprising (E)', 'Conventional (C)'],
+                    datasets: [{
+                        label: 'Skor Minat (%)',
+                        data: [percentages.R, percentages.I, percentages.A, percentages.S, percentages.E, percentages.C],
+                        backgroundColor: 'rgba(59, 130, 246, 0.25)',
+                        borderColor: '#2563eb',
+                        borderWidth: 2,
+                        pointBackgroundColor: '#1d4ed8'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            suggestedMin: 0,
+                            suggestedMax: 100,
+                            ticks: { display: false }
+                        }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            if (setInstanceCallback) setInstanceCallback(newChart);
+            const sorted = Object.keys(percentages).sort((a, b) => percentages[b] - percentages[a]);
+            document.getElementById('val-holland-code').innerText = `${sorted[0]} - ${sorted[1]} - ${sorted[2]}`;
+        }
+
+        function renderMajorRecommendations(sortedCats, containerId) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            const topPair = sortedCats[0] + sortedCats[1];
+
+            const majorDatabase = {
+                'IR': [
+                    { title: 'Teknik Informatika / Software Eng.', desc: 'Merancang software & sistem IT.', career: 'Software Dev, Data Engineer' },
+                    { title: 'Teknik Elektro / Mesin', desc: 'Sistem mekanis & ketenagalistrikan.', career: 'Robotics Engineer, Technician' },
+                    { title: 'Sains Data & AI', desc: 'Pengolahan data besar & kecerdasan buatan.', career: 'Data Scientist, Analyst' }
+                ],
+                'IA': [
+                    { title: 'Arsitektur & Desain Lingkungan', desc: 'Perpaduan struktur teknis dan estetika.', career: 'Arsitek, Interior Designer' },
+                    { title: 'Teknologi Game & Animasi', desc: 'Pemrograman logika & seni 3D.', career: 'Game Dev, VFX Artist' },
+                    { title: 'Desain Produk / DKV', desc: 'Inovasi bentuk & komunikasi visual.', career: 'Product Designer, Creative Lead' }
+                ],
+                'IS': [
+                    { title: 'Kedokteran & Kesehatan', desc: 'Riset sains biologi dan pelayanan medis.', career: 'Dokter, Apoteker, Peneliti' },
+                    { title: 'Psikologi', desc: 'Studi perilaku manusia & konseling.', career: 'Psikolog, Konselor, HRD' },
+                    { title: 'Pendidikan Sains / MIPA', desc: 'Pengajaran sains dan edukasi.', career: 'Guru Sains, Dosen, Edukator' }
+                ],
+                'SA': [
+                    { title: 'Desain Komunikasi Visual (DKV)', desc: 'Komunikasi media visual & grafis.', career: 'Graphic Designer, Art Director' },
+                    { title: 'Ilmu Komunikasi & PR', desc: 'Hubungan masyarakat & media massa.', career: 'PR Specialist, Jurnalis' },
+                    { title: 'Sastra & Bahasa Asing', desc: 'Pengembangan budaya dan bahasa.', career: 'Penerjemah, Penulis Naskah' }
+                ],
+                'SE': [
+                    { title: 'Ilmu Hukum / Legal', desc: 'Advokasi aturan & hukum bisnis.', career: 'Pengacara, Konsultan Hukum' },
+                    { title: 'Manajemen SDM (HRM)', desc: 'Pengelolaan organisasi & SDM.', career: 'HR Manager, Talent Recruiter' },
+                    { title: 'Pariwisata & Event Management', desc: 'Manajemen layanan & acara.', career: 'Event Director, Hotel Manager' }
+                ],
+                'EC': [
+                    { title: 'Akuntansi & Keuangan', desc: 'Pengelolaan anggaran & audit.', career: 'Akuntan, Financial Auditor' },
+                    { title: 'Bisnis Digital / Marketing', desc: 'Strategi pemasaran digital.', career: 'Digital Marketer, Entrepreneur' },
+                    { title: 'Administrasi Perkantoran', desc: 'Efisiensi operasional bisnis.', career: 'Admin Manager, Operasional' }
+                ]
+            };
+
+            const defaultMajors = [
+                { title: 'Teknologi Informasi', desc: 'Pengembangan aplikasi digital.', career: 'Web Dev, IT Specialist' },
+                { title: 'Manajemen Bisnis', desc: 'Pengelolaan dan strategi wirausaha.', career: 'Business Analyst, Manager' },
+                { title: 'Ilmu Komunikasi', desc: 'Komunikasi publik & media.', career: 'PR Officer, Content Strategist' }
+            ];
+
+            const matchedList = majorDatabase[topPair] || majorDatabase[topPair.split('').reverse().join('')] || defaultMajors;
+
+            matchedList.forEach(m => {
+                const card = document.createElement('div');
+                card.className = 'p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 flex flex-col justify-between';
+                card.innerHTML = `
+                    <div class="space-y-1">
+                        <span class="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold text-[10px] rounded">Rekomendasi Utama</span>
+                        <h4 class="font-bold text-slate-800 text-xs">${m.title}</h4>
+                        <p class="text-[11px] text-slate-600">${m.desc}</p>
+                    </div>
+                    <div class="pt-2 border-t border-slate-200/60 text-[10px] text-slate-500">
+                        <strong>Prospek:</strong> ${m.career}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+
+            return matchedList;
+        }
+
+        function renderGuidanceTips(sortedCats, isSMA) {
+            const studentList = document.getElementById('list-student-advice');
+            const parentList = document.getElementById('list-parent-advice');
+            studentList.innerHTML = '';
+            parentList.innerHTML = '';
+
+            const sTips = [
+                "Eksplorasi ekstrakurikuler sekolah yang sesuai dengan 2 skor minat teratasmu.",
+                "Ikuti event kunjungan sekolah SMA/SMK terdekat untuk melihat lingkungan belajar."
+            ];
+            if (isSMA) sTips.push("Biasakan gaya belajar mandiri dan melatih latihan soal bernalar logis.");
+            else sTips.push("Cobalah membuat proyek karya praktis atau mengikuti workshop keahlian.");
+
+            sTips.forEach(t => {
+                const li = document.createElement('li');
+                li.innerText = t;
+                studentList.appendChild(li);
+            });
+
+            const pTips = [
+                "Diskusikan hasil tes ini secara terbuka tanpa memaksakan kehendak orang tua.",
+                "Dukung minat anak dengan memfasilitasi buku bacaan atau perlengkapan latihannya."
+            ];
+            pTips.forEach(t => {
+                const li = document.createElement('li');
+                li.innerText = t;
+                parentList.appendChild(li);
+            });
+        }
+
+        /* ---------------------------------------------------------------------
+           8. TEACHER DASHBOARD REAL-TIME LISTENER & MANAGEMENT
+           --------------------------------------------------------------------- */
+        window.initTeacherListener = function() {
+            if (!window.db || !window.firestoreMethods) return;
+            const { collection, onSnapshot } = window.firestoreMethods;
+            const colRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'submissions');
+
+            onSnapshot(colRef, (snapshot) => {
+                teacherSubmissionsCache = [];
+                snapshot.forEach(doc => {
+                    teacherSubmissionsCache.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Sort timestamp descending
+                teacherSubmissionsCache.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                renderTeacherDashboard();
+            }, (error) => {
+                console.error("Teacher Realtime Listener Error:", error);
+            });
+        };
+
+        function renderTeacherDashboard() {
+            if (!isTeacherLoggedIn) return;
+
+            const total = teacherSubmissionsCache.length;
+            const countSMA = teacherSubmissionsCache.filter(s => s.recommendation === 'SMA').length;
+            const countSMK = teacherSubmissionsCache.filter(s => s.recommendation === 'SMK').length;
+
+            document.getElementById('stat-total-students').innerText = total;
+            document.getElementById('stat-total-sma').innerText = countSMA;
+            document.getElementById('stat-total-smk').innerText = countSMK;
+
+            const pctSMA = total > 0 ? Math.round((countSMA / total) * 100) : 0;
+            const pctSMK = total > 0 ? Math.round((countSMK / total) * 100) : 0;
+            document.getElementById('stat-pct-sma').innerText = `${pctSMA}% dari total`;
+            document.getElementById('stat-pct-smk').innerText = `${pctSMK}% dari total`;
+
+            // Calculate dominant Holland Code
+            const hollandCounts = {};
+            teacherSubmissionsCache.forEach(s => {
+                if (s.hollandCode) {
+                    hollandCounts[s.hollandCode] = (hollandCounts[s.hollandCode] || 0) + 1;
+                }
+            });
+            let topCode = '-';
+            let maxCount = 0;
+            for (let code in hollandCounts) {
+                if (hollandCounts[code] > maxCount) {
+                    maxCount = hollandCounts[code];
+                    topCode = code;
+                }
+            }
+            document.getElementById('stat-top-holland').innerText = topCode;
+
+            // Populate Class Filter Options dynamically
+            const filterClass = document.getElementById('admin-filter-class');
+            const currentSelectedClass = filterClass.value;
+            const classes = Array.from(new Set(teacherSubmissionsCache.map(s => s.studentProfile?.grade).filter(Boolean))).sort();
+            
+            filterClass.innerHTML = `<option value="ALL">Semua Kelas</option>`;
+            classes.forEach(c => {
+                filterClass.innerHTML += `<option value="${c}">${c}</option>`;
+            });
+            filterClass.value = currentSelectedClass || "ALL";
+
+            filterTeacherTable();
+        }
+
+        function filterTeacherTable() {
+            const searchVal = document.getElementById('admin-search-input').value.toLowerCase().trim();
+            const classVal = document.getElementById('admin-filter-class').value;
+            const tbody = document.getElementById('table-teacher-rows');
+            tbody.innerHTML = '';
+
+            const filtered = teacherSubmissionsCache.filter(item => {
+                const nameMatch = (item.studentProfile?.name || '').toLowerCase().includes(searchVal) ||
+                                  (item.studentProfile?.nis || '').toLowerCase().includes(searchVal);
+                const classMatch = classVal === 'ALL' || item.studentProfile?.grade === classVal;
+                return nameMatch && classMatch;
+            });
+
+            document.getElementById('admin-table-count').innerText = filtered.length;
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="py-8 text-center text-slate-400">
+                            Tidak ada data siswa yang cocok dengan filter.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            filtered.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition border-b border-slate-100';
+
+                const isSma = item.recommendation === 'SMA';
+                const recBadge = isSma 
+                    ? `<span class="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold rounded">SMA (${item.smaPct}%)</span>`
+                    : `<span class="px-2 py-0.5 bg-indigo-100 text-indigo-800 font-bold rounded">SMK (${item.smkPct}%)</span>`;
+
+                tr.innerHTML = `
+                    <td class="py-3 px-4 text-slate-500">${item.formattedTime || '-'}</td>
+                    <td class="py-3 px-4 font-bold text-slate-800">${item.studentProfile?.name || '-'}</td>
+                    <td class="py-3 px-4 text-slate-600">${item.studentProfile?.grade || '-'}</td>
+                    <td class="py-3 px-4 text-slate-500">${item.studentProfile?.nis || '-'}</td>
+                    <td class="py-3 px-4 text-center">${recBadge}</td>
+                    <td class="py-3 px-4 text-center font-bold text-indigo-600">${item.hollandCode || '-'}</td>
+                    <td class="py-3 px-4 text-slate-600">${(item.topMajors && item.topMajors[0]) || '-'}</td>
+                    <td class="py-3 px-4 text-center">
+                        <div class="flex items-center justify-center gap-1.5">
+                            <button onclick="viewStudentDetail('${item.id}')" class="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-semibold transition">
+                                🔍 Detail
+                            </button>
+                            <button onclick="confirmDeleteSubmission('${item.id}')" class="px-2 py-1 text-red-600 hover:bg-red-50 rounded-lg font-semibold transition">
+                                🗑️
+                            </button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function viewStudentDetail(id) {
+            const item = teacherSubmissionsCache.find(s => s.id === id);
+            if (!item) return;
+
+            document.getElementById('modal-detail-name').innerText = item.studentProfile?.name || 'Siswa';
+            document.getElementById('modal-detail-meta').innerText = 
+                `Kelas: ${item.studentProfile?.grade || '-'} | NIS: ${item.studentProfile?.nis || '-'} | Waktu: ${item.formattedTime || '-'}`;
+
+            document.getElementById('modal-detail-rec-badge').innerText = 
+                `Rekomendasi: ${item.recommendation} (SMA ${item.smaPct}% vs SMK ${item.smkPct}%)`;
+
+            document.getElementById('modal-detail-tracks').innerHTML = getTrackSuggestions(
+                Object.keys(item.scores || {}).sort((a, b) => item.scores[b] - item.scores[a]),
+                item.recommendation === 'SMA'
+            );
+
+            document.getElementById('modal-detail-holland').innerText = item.hollandCode || '-';
+
+            // Majors
+            const majorsContainer = document.getElementById('modal-detail-majors');
+            majorsContainer.innerHTML = '';
+            (item.topMajors || []).forEach(m => {
+                majorsContainer.innerHTML += `
+                    <div class="p-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-800 text-xs">
+                        🎓 ${m}
+                    </div>
+                `;
+            });
+
+            // Radar Chart inside Modal
+            if (modalRadarChartInstance) modalRadarChartInstance.destroy();
+            const ctx = document.getElementById('modalDetailRadarChart').getContext('2d');
+            modalRadarChartInstance = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: ['R', 'I', 'A', 'S', 'E', 'C'],
+                    datasets: [{
+                        data: [item.scores?.R||0, item.scores?.I||0, item.scores?.A||0, item.scores?.S||0, item.scores?.E||0, item.scores?.C||0],
+                        backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                        borderColor: '#6366f1',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { r: { suggestedMin: 0, suggestedMax: 100, ticks: { display: false } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            document.getElementById('modal-student-detail').classList.remove('hidden');
+        }
+
+        function closeStudentDetailModal() {
+            document.getElementById('modal-student-detail').classList.add('hidden');
+        }
+
+        function confirmDeleteSubmission(id) {
+            customConfirm("Hapus Record Siswa?", "Data hasil tes siswa ini akan dihapus dari Firestore.", async () => {
+                try {
+                    const { doc, deleteDoc } = window.firestoreMethods;
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'submissions', id);
+                    await deleteDoc(docRef);
+                    showToast("Data siswa berhasil dihapus.", "success");
+                } catch (err) {
+                    console.error("Delete error:", err);
+                    showToast("Gagal menghapus data dari Firestore.", "error");
+                }
+            });
+        }
+
+        /* ---------------------------------------------------------------------
+           9. CSV EXPORT ENGINE
+           --------------------------------------------------------------------- */
+        function exportToCSV() {
+            if (teacherSubmissionsCache.length === 0) {
+                showToast("Tidak ada data siswa untuk di-export.", "error");
+                return;
+            }
+
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Waktu,Nama Siswa,Kelas,NIS,Rekomendasi,Skor SMA (%),Skor SMK (%),Kode Holland,Jurusan Utama\n";
+
+            teacherSubmissionsCache.forEach(s => {
+                const name = `"${(s.studentProfile?.name || '').replace(/"/g, '""')}"`;
+                const grade = `"${s.studentProfile?.grade || ''}"`;
+                const nis = `"${s.studentProfile?.nis || ''}"`;
+                const rec = s.recommendation || '';
+                const smaPct = s.smaPct || 0;
+                const smkPct = s.smkPct || 0;
+                const holland = s.hollandCode || '';
+                const major = `"${(s.topMajors && s.topMajors[0] ? s.topMajors[0] : '').replace(/"/g, '""')}"`;
+                const time = `"${s.formattedTime || ''}"`;
+
+                csvContent += `${time},${name},${grade},${nis},${rec},${smaPct},${smkPct},${holland},${major}\n`;
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `Rekap_Minat_Bakat_SMP_${new Date().toISOString().slice(0,10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            showToast("Berhasil mengunduh berkas CSV!", "success");
+        }
+
+        function resetQuiz() {
+            answers.fill(null);
+            currentQuestionIdx = 0;
+            document.getElementById('sec-result').classList.add('hidden');
+            document.getElementById('sec-landing').classList.remove('hidden');
+            document.getElementById('form-identity').reset();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
